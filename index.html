@@ -1,0 +1,126 @@
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>How to send a MediaStreamTrack with ORTC</title>
+  <style>
+#container {
+  margin: 0 auto 0 auto;
+  max-width: 40em;
+}
+video {
+  height: 225px;
+  width: calc(50% - 12px)
+}
+  </style>
+</head>
+<body>
+  <div id="container">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+    <p>
+    This shows how to send a MediaStreamTrack with ORTC. Note that ORTC is only supported in Microsoft Edge right now and (at the time of this writing) is considered experimental.
+    </p>
+  </div>
+  <script>
+var iceOptions = { "gatherPolicy": "all", "iceServers": [] };
+
+// At the Sender side, create an ICE gatherer, an ICE transport
+// and a DTLS transport.
+var gatherer1 = new RTCIceGatherer(iceOptions);
+var transport1 = new RTCIceTransport(gatherer1);
+var dtls1 = new RTCDtlsTransport(transport1);
+
+// Do the same for the Receiver.
+var gatherer2 = new RTCIceGatherer(iceOptions);
+var transport2 = new RTCIceTransport(gatherer2);
+var dtls2 = new RTCDtlsTransport(transport2);
+
+var sender;
+var receiver;
+
+// Exchange ICE candidates.
+gatherer1.onlocalcandidate = function (evt) {
+    console.log('1 -> 2', evt.candidate);
+    transport2.addRemoteCandidate(evt.candidate);
+};
+gatherer2.onlocalcandidate = function (evt) {
+    console.log('2 -> 1', evt.candidate);
+    transport1.addRemoteCandidate(evt.candidate);
+};
+
+// Next, start the ICE transports with the parameters from the remote side
+// and the gatherer.
+transport1.start(gatherer1, gatherer2.getLocalParameters(), 'controlling');
+transport1.onicestatechange = function() {
+  console.log('ICE transport 1 state change', transport1.state);
+};
+
+transport2.start(gatherer2, gatherer1.getLocalParameters(), 'controlled');
+transport2.onicestatechange = function() {
+  console.log('ICE transport 2 state change', transport2.state);
+};
+
+// Then, start the DTLS transports with the parameters from the remote side.
+dtls1.start(dtls2.getLocalParameters());
+dtls1.ondtlsstatechange = function() {
+  console.log('DTLS transport 1 state change', dtls1.state);
+};
+
+dtls2.start(dtls1.getLocalParameters());
+dtls2.ondtlsstatechange = function() {
+  console.log('DTLS transport 2 state change', dtls2.state);
+};
+
+// call getUserMedia to get a MediaStream.
+navigator.mediaDevices.getUserMedia({video: true})
+.then(function(stream) {
+  document.getElementById('localVideo').srcObject = stream;
+
+  // Determine RtpCodecParameters. Consider this black magic.
+  var params = RTCRtpReceiver.getCapabilities('video');
+  params.muxId = 1001;
+  params.encodings = [{
+    ssrc: 1001,
+    codecPayloadType: 0,
+    fec: 0,
+    rtx: 0,
+    priority: 1.0,
+    maxBitrate: 2000000.0,
+    minQuality: 0,
+    framerateBias: 0.5,
+    resolutionScale: 1.0,
+    framerateScale: 1.0,
+    active: true,
+    dependencyEncodingId: undefined,
+    encodingId: undefined
+  }];
+
+  // We need to transform the codec capability into a codec.
+  params.codecs.forEach(function (codec) {
+    codec.payloadType = codec.preferredPayloadType;
+  });
+  params.rtcp = {
+    cname: "",
+    reducedSize: false,
+    ssrc: 0,
+    mux: true
+  };
+  console.log(params);
+
+  // Start the RtpReceiver to receive the track.
+  receiver = new RTCRtpReceiver(dtls2, 'video');
+  receiver.receive(params);
+  var remoteStream = new MediaStream();
+  remoteStream.addTrack(receiver.track);
+  document.getElementById('remoteVideo').srcObject = remoteStream;
+
+  // Last but not least, create the RTPSender to send the track.
+  sender = new RTCRtpSender(stream.getVideoTracks()[0], dtls1);
+  sender.send(params);
+})
+.catch(function(err) {
+  console.error(err);
+});
+  </script>
+</body>
+</html>
