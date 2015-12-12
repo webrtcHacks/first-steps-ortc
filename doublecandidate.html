@@ -1,0 +1,77 @@
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>How to send a MediaStreamTrack with ORTC</title>
+  <style>
+#container {
+  margin: 0 auto 0 auto;
+  max-width: 40em;
+}
+video {
+  height: 225px;
+  width: calc(50% - 12px)
+}
+  </style>
+</head>
+<body>
+  <div id="container">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+    <p>
+    This shows how to send a MediaStreamTrack with ORTC. Note that ORTC is only supported in Microsoft Edge right now and (at the time of this writing) is considered experimental.
+    </p>
+  </div>
+  <script>
+var iceOptions = { "gatherPolicy": "all", "iceServers": [] };
+
+// At the Sender side, create an ICE gatherer, an ICE transport
+// and a DTLS transport.
+var gatherer1 = new RTCIceGatherer(iceOptions);
+var transport1 = new RTCIceTransport(gatherer1);
+var dtls1 = new RTCDtlsTransport(transport1);
+
+// Exchange ICE candidates.
+gatherer1.onlocalcandidate = function (evt) {
+    console.log('1 -> 2', evt.candidate);
+    //transport2.addRemoteCandidate(evt.candidate);
+};
+function parseCandidate(line) {
+  var parts;
+  // Parse both variants.
+  if (line.indexOf('a=candidate:') === 0) {
+    parts = line.substring(12).split(' ');
+  } else {
+    parts = line.substring(10).split(' ');
+  }
+
+  var candidate = {
+    foundation: parts[0],
+    component: parts[1],
+    protocol: parts[2].toLowerCase(),
+    priority: parseInt(parts[3], 10),
+    ip: parts[4],
+    port: parseInt(parts[5], 10),
+    // skip parts[6] == 'typ'
+    type: parts[7]
+  };
+
+  return candidate;
+};
+// why do these have different priorities? from mantis
+var first = parseCandidate('a=candidate:1796272311 1 UDP 2130706431 52.89.123.61 20425 typ host generation 0');
+var second = parseCandidate('candidate:1796272311 2 UDP 2130706430 52.89.123.61 20425 typ host generation 0');
+
+transport1.setRemoteCandidates([
+    first, second
+]);
+
+// Next, start the ICE transports with the parameters from the remote side
+// and the gatherer.
+transport1.start(gatherer1, gatherer2.getLocalParameters(), 'controlling');
+transport1.onicestatechange = function() {
+  console.log('ICE transport 1 state change', transport1.state);
+};
+
+  </script>
+</body>
+</html>
