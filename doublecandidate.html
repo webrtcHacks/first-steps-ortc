@@ -30,6 +30,8 @@ var gatherer1 = new RTCIceGatherer(iceOptions);
 var transport1 = new RTCIceTransport(gatherer1);
 var dtls1 = new RTCDtlsTransport(transport1);
 
+var gatherer2 = new RTCIceGatherer(iceOptions);
+
 // Exchange ICE candidates.
 gatherer1.onlocalcandidate = function (evt) {
     console.log('1 -> 2', evt.candidate);
