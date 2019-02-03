@@ -1,0 +1,149 @@
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>How to send a data over a quic stream</title>
+  <style>
+#container {
+  margin: 0 auto 0 auto;
+  max-width: 40em;
+}
+
+textarea {
+  color: #444;
+  font-size: 0.9em;
+  font-weight: 300;
+  height: 7.0em;
+  padding: 5px;
+  width: calc(100% - 10px);
+}
+
+button {
+  width: 90px;
+  background-color: #d84a38;
+  border: none;
+  border-radius: 2px;
+  color: white;
+  font-family: 'Roboto', sans-serif;
+  font-size: 0.8em;
+  margin: 0 0 1em 0;
+  padding: 0.5em 0.7em 0.6em 0.7em;
+}
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="send">
+        <h2>Send</h2>
+        <textarea id="dataChannelSend" disabled
+                  placeholder="Press Start, enter some text, then press Send."></textarea>
+    </div>
+    <div id="buttons">
+        <button id="sendButton" disabled>Send</button>
+    </div>
+    <div id="receive">
+        <h2>Receive</h2>
+        <textarea id="dataChannelReceive" disabled></textarea>
+    </div>
+    <p>
+    This shows how to send data over a quic stream ontop of an ICE transport. Note that QUIC support in Google Chrome is non-standard at this point and severely deviating from the specification. See <a href="https://developers.google.com/web/updates/2019/01/rtcquictransport-api">here</a> for more information.
+    To run this in Chrome 73 you may need to start Chrome with these command line arguments:
+        <code>
+        --enable-blink-features=RTCQuicTransport,RTCIceTransportExtension
+        </code>
+    </p>
+  </div>
+  <script>
+// Text encoder/decoder for transforming text into a Uint8Array and vice versa.
+const decoder = new TextDecoder('utf-8');
+const encoder = new TextEncoder('utf-8');
+
+const iceOptions = {}; // STUN/TURN servers. Not used by this example.
+
+// At the Sender side, create an ICE transport
+// and a QUIC transport.
+const ice1 = new RTCIceTransport();
+ice1.onstatechange = function() {
+  console.log('ICE transport 1 state change', ice1.state);
+};
+// Create the QUIC transport.
+const quic1 = new RTCQuicTransport(ice1);
+quic1.onstatechange = function() {
+  console.log('QUIC transport 1 state change', quic1.state);
+
+  if (quic1.state === 'connected' && !sendStream) {
+    sendStream = quic1.createStream('webrtchacks'); // similar to createDataChannel.
+    document.getElementById('sendButton').disabled = false;
+    document.getElementById('dataChannelSend').disabled = false;
+  }
+};
+
+// Do the same for the Receiver.
+const ice2 = new RTCIceTransport();
+ice2.onstatechange = function() {
+  console.log('ICE transport 2 state change', ice2.state);
+};
+
+const quic2 = new RTCQuicTransport(ice2);
+quic2.onstatechange = function() {
+  console.log('QUIC transport 2 state change', quic2.state);
+};
+
+// Add an event listener for the QUIC stream.
+quic2.addEventListener('quicstream', (e) => {
+    console.log('QUIC transport 2 got a stream', e.stream);
+    receiveStream = e.stream;
+    receiveStream.waitForReadable(1)
+        .then(ondata);
+});
+
+function ondata() {
+    const buffer = new Uint8Array(receiveStream.readBufferedAmount);
+    const res = receiveStream.readInto(buffer);
+    const data = decoder.decode(buffer);
+    document.getElementById('dataChannelReceive').value = data;
+    receiveStream.waitForReadable(1)
+        .then(ondata);
+}
+
+// Those streams can (currently?) only be created once the connection is up.
+let sendStream;
+let receiveStream;
+
+// Exchange ICE candidates.
+ice1.onicecandidate = function(evt) {
+    console.log('1 -> 2', evt.candidate);
+    if (evt.candidate) {
+        ice2.addRemoteCandidate(evt.candidate);
+    }
+};
+ice2.onicecandidate = function(evt) {
+    console.log('2 -> 1', evt.candidate);
+    if (evt.candidate) {
+        ice1.addRemoteCandidate(evt.candidate);
+    }
+};
+
+// Start the ICE transports.
+ice1.start(ice2.getLocalParameters(), 'controlling');
+ice2.start(ice1.getLocalParameters(), 'controlled');
+ice1.gather(iceOptions);
+ice2.gather(iceOptions);
+
+// Then, start the QUIC transports with the parameters from the remote side.
+// This is highly non-spec in Chrome.
+quic2.listen(new Uint8Array(quic1.getKey()));
+quic1.connect();
+
+// Make the send button do something useful. In this case: send the string encoded as a Uint8Array.
+document.getElementById('sendButton').onclick = () => {
+    const rawData = document.getElementById('dataChannelSend').value;
+    document.getElementById('dataChannelSend').value = '';
+    // we need a Uint8Array. Fortunately text is easy to convert using TextEncoder.
+    const data = encoder.encode(rawData);
+    sendStream.write({
+        data,
+    });
+};
+  </script>
+</body>
+</html>
